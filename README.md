@@ -1,7 +1,6 @@
 ﻿LiveSplit.UnderworldAscendant
 =====================
-
-LiveSplit.UnderworldAscendant is a [LiveSplit](http://livesplit.org/) component for Thief: Deadly Shadows (for real!).
+LiveSplit.UnderworldAscendant is a [LiveSplit](http://livesplit.org/) component for Underworld Ascendant.
 
 Features
 --------
@@ -10,9 +9,9 @@ Features
 Requirements
 ------------
 
-  * Thief: Deadly Shadows (tested only GOG)
+  * Underworld Ascendant
   * LiveSplit 1.4+
-  * .NET Framework 4  
+  * .NET Framework 4.5 
 
 Install
 -------
@@ -30,4 +29,3 @@ After configuring everything you'll most likely want to turn on game time as pri
 Credits
 -------
   * [SuicideMachine](http://twitch.tv/suicidemachine)
-  * Plugin is based off [LiveSplit.Dishonored](https://github.com/fatalis/LiveSplit.Dishonored) by [Fatalis](http://twitch.tv/fatalis_).
