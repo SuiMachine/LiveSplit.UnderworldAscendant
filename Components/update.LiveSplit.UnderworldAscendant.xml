@@ -1,4 +1,12 @@
 <updates>
+	<update version="1.1.0">
+		<files>
+			<file path="Components/LiveSplit.UnderworldAscendant.dll" status="changed"/>
+		</files>
+		<changelog>
+			<change>Added support for 1.1 version of the game.</change>
+		</changelog>
+	</update>
 	<update version="1.0.0">
 		<files>
 			<file path="Components/LiveSplit.UnderworldAscendant.dll" status="changed"/>

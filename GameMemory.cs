@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -62,6 +63,17 @@ namespace LiveSplit.UnderworldAscendant
         string currentLevelName = "";
         string prevLevelName = "";
         bool loadingStarted = false;
+
+        //This is a size of Assembly-CSharp.dll, not main module!
+        enum CsharpAssemblySizes
+        {
+            v1_02 = 0,
+            v1_1 = 5386752,
+            Newest
+        }
+
+        int gameVersion = 0;
+
         IntPtr LevelSystemInstancePointer = IntPtr.Zero;
 
         void MemoryReadThread()
@@ -192,8 +204,21 @@ namespace LiveSplit.UnderworldAscendant
                         }
                         else
                         {
-                            currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
-                            isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xBA));
+                            switch(gameVersion)
+                            {
+                                case 0:
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
+                                    isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xBA));
+                                    break;
+                                case 1:
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
+                                    isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
+                                    break;
+                                default:
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
+                                    isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xBA));
+                                    break;
+                            }
 
                             if (isLoading != prevIsLoading || currentLevelName != prevLevelName)
                             {
@@ -287,6 +312,22 @@ namespace LiveSplit.UnderworldAscendant
             {
                 _ignorePIDs.Add(game.Id);
                 return null;
+            }
+
+            var assemblyCsharpPath = Path.Combine(Path.GetDirectoryName(game.MainModule.FileName), "UA_Data", "Managed", "Assembly-CSharp.dll");
+            FileInfo info = new FileInfo(assemblyCsharpPath);
+            switch(info.Length)
+            {
+                case ((long)CsharpAssemblySizes.v1_02):
+                    gameVersion = 0;
+                    break;
+                case ((long)CsharpAssemblySizes.v1_1):
+                    gameVersion = 1;
+                    break;
+                default:
+                    gameVersion = 2;
+                    break;
+
             }
 
             return game;
