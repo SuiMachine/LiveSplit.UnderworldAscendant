@@ -15,7 +15,7 @@ Requirements
 
 Install
 -------
-Starting with LiveSplit 1.4, you can download and install LiveSplit.UnderworldAscendant automatically from within the Splits Editor with just one click. Just type in "Underworld Ascendant" (not submitted yet) and click Activate. This downloads LiveSplit.UnderworldAscendant to the Components folder.
+Starting with LiveSplit 1.4, you can download and install LiveSplit.UnderworldAscendant automatically from within the Splits Editor with just one click. Just type in "Underworld Ascendant" and click Activate. This downloads LiveSplit.UnderworldAscendant to the Components folder.
 
 If the plugin is not working with this process, download the plugin from the [releases page](https://github.com/SuiMachine/LiveSplit.UnderworldAscendant/releases) and place the LiveSplit.UnderworldAscendant.dll in your Components directory of LiveSplit.
 
