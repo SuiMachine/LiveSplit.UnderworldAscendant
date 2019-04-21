@@ -7,17 +7,23 @@ namespace LiveSplit.UnderworldAscendant
 {
     public partial class UnderworldAscendantSettings : UserControl
     {
-        public bool UseNonSafeMemoryReading { get; set; }
+        public bool SplitOnLevelChange { get; set; }
+        public int RescansLimit { get; set; }
 
-
-        private const bool DEFAULT_UNSAFEREADER = true;
+        //Defaults
+        private const bool DEFAULT_SPLIT_ONLEVELCHANGE = false;
+        private const int DEFAULT_RESCANS_LIMIT = 0;
 
         public UnderworldAscendantSettings()
         {
             InitializeComponent();
 
+            this.CB_SplitOnLevelChange.DataBindings.Add("Checked", this, "SplitOnLevelChange", false, DataSourceUpdateMode.OnPropertyChanged);
+            this.NumUpDn_RescansLimit.DataBindings.Add("Value", this, "RescansLimit", false, DataSourceUpdateMode.OnPropertyChanged);
+
             // defaults
-            this.UseNonSafeMemoryReading = DEFAULT_UNSAFEREADER;
+            this.SplitOnLevelChange = DEFAULT_SPLIT_ONLEVELCHANGE;
+            this.RescansLimit = DEFAULT_RESCANS_LIMIT;
         }
 
         public XmlNode GetSettings(XmlDocument doc)
@@ -26,12 +32,16 @@ namespace LiveSplit.UnderworldAscendant
 
             settingsNode.AppendChild(ToElement(doc, "Version", Assembly.GetExecutingAssembly().GetName().Version.ToString(3)));
 
+            settingsNode.AppendChild(ToElement(doc, "SplitOnLevelChange", this.SplitOnLevelChange));
+            settingsNode.AppendChild(ToElement(doc, "RescansLimit", this.RescansLimit));
+
             return settingsNode;
         }
 
         public void SetSettings(XmlNode settings)
         {
-            this.UseNonSafeMemoryReading = ParseBool(settings, "NonSafeMemoryReader", DEFAULT_UNSAFEREADER);
+            this.SplitOnLevelChange = ParseBool(settings, "SplitOnLevelChange", DEFAULT_SPLIT_ONLEVELCHANGE);
+            this.RescansLimit = ParseInt(settings, "RescansLimit", DEFAULT_RESCANS_LIMIT);
         }
 
         static bool ParseBool(XmlNode settings, string setting, bool default_ = false)
@@ -39,6 +49,14 @@ namespace LiveSplit.UnderworldAscendant
             bool val;
             return settings[setting] != null ?
                 (Boolean.TryParse(settings[setting].InnerText, out val) ? val : default_)
+                : default_;
+        }
+
+        static int ParseInt(XmlNode settings, string setting, int default_ = 0)
+        {
+            int val;
+            return settings[setting] != null ?
+                (int.TryParse(settings[setting].InnerText, out val) ? val : default_)
                 : default_;
         }
 

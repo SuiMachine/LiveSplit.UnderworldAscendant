@@ -9,7 +9,7 @@ Features
 Requirements
 ------------
 
-  * Underworld Ascendant
+  * Underworld Ascendant (tested with versions 1.02, 1.1 and 1.3)
   * LiveSplit 1.4+
   * .NET Framework 4.5 
 

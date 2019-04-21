@@ -15,6 +15,8 @@ namespace LiveSplit.UnderworldAscendant
 
         public event EventHandler OnLoadStarted;
         public event EventHandler OnLoadFinished;
+        public event EventHandler OnLevelChanged;
+
 
         private Task _thread;
         private CancellationTokenSource _cancelSource;
@@ -67,7 +69,7 @@ namespace LiveSplit.UnderworldAscendant
         //This is a size of Assembly-CSharp.dll, not main module!
         enum CsharpAssemblySizes
         {
-            v1_02 = 0,
+            v1_02 = 5471232,
             v1_1 = 5386752,
             Newest
         }
@@ -75,6 +77,7 @@ namespace LiveSplit.UnderworldAscendant
         int gameVersion = 0;
 
         IntPtr LevelSystemInstancePointer = IntPtr.Zero;
+
 
         void MemoryReadThread()
         {
@@ -123,10 +126,18 @@ namespace LiveSplit.UnderworldAscendant
                         if (!isLevelSystemHooked)
                         {
                             #region Hooking
-                            if (failedScansCount > 3)
+                            if (_settings.RescansLimit != 0 && failedScansCount >= _settings.RescansLimit)
                             {
-                                _ignorePIDs.Add(game.Id);
-                                MessageBox.Show("Failed to find the pattern during the 3 scan loops and the process is now going to be ignored");
+                                var result = MessageBox.Show("Failed to find the pattern during the 3 scan loops. Want to retry scans?", "Error", MessageBoxButtons.RetryCancel, MessageBoxIcon.Exclamation);
+                                if (result == DialogResult.Cancel)
+                                {
+                                    _ignorePIDs.Add(game.Id);
+                                }
+                                else
+                                    failedScansCount = 0;
+                                //Should refresh game pages... hopefully. The memory pages extansion is really poop.
+                                game = null;
+
                             }
                             //Hook only if the process is at least 15s old (since it takes forever with allocating stuff)
                             else if (game.UserProcessorTime >= TimeSpan.FromSeconds(15))
@@ -143,8 +154,8 @@ namespace LiveSplit.UnderworldAscendant
                                     "48 8B C8 " +
                                     "48 89 45 F0 " +
                                     "FF 50 18 " +
-                                    "48 8B 45 F0 " +
-                                    "48 8B 75 F8");
+                                    "48 8B 45 F0 ");
+
 
                                 LevelSystemInstancePointer = game.AllocateMemory(IntPtr.Size);
                                 Debug.WriteLine("[NOLOADS] injectedPtrForLevelSystemPtr allocated at: " + LevelSystemInstancePointer.ToString("X8"));
@@ -176,6 +187,8 @@ namespace LiveSplit.UnderworldAscendant
                                 if (functionAddress == IntPtr.Zero)
                                 {
                                     failedScansCount++;
+                                    Debug.WriteLine("[NOLOADS] Failed scans: " + failedScansCount);
+                                    game.FreeMemory(LevelSystemInstancePointer);
                                 }
                                 else
                                 {
@@ -208,7 +221,7 @@ namespace LiveSplit.UnderworldAscendant
                             {
                                 case 0:
                                     currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
-                                    isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xBA));
+                                    isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
                                     break;
                                 case 1:
                                     currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
@@ -239,6 +252,8 @@ namespace LiveSplit.UnderworldAscendant
                                 }
                                 else
                                 {
+
+
                                     Debug.WriteLine(String.Format("[NoLoads] Load End - {0}", frameCounter));
 
                                     if (loadingStarted)
@@ -255,7 +270,17 @@ namespace LiveSplit.UnderworldAscendant
                                         }, null);
                                     }
                                 }
-                                Debug.WriteLine("IsLoading = " + isLoading + ", LevelName = " + currentLevelName);
+
+                                if (currentLevelName != prevLevelName && prevLevelName != null && prevLevelName != "")
+                                {
+                                    _uiThread.Post(d =>
+                                    {
+                                        if (OnLevelChanged != null)
+                                        {
+                                            OnLevelChanged(this, EventArgs.Empty);
+                                        }
+                                    }, null);
+                                }
                             }
 
                             prevIsLoading = isLoading;
