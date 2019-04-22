@@ -1,4 +1,15 @@
 <updates>
+	<update version="1.3.0">
+		<files>
+			<file path="Components/LiveSplit.UnderworldAscendant.dll" status="changed"/>
+		</files>
+		<changelog>
+			<change>Added option to autostart on first load completion.</change>
+			<change>Implemented list of levels excluded from autosplitting (MainMenu, IntroSequence, Credits).</change>
+			<change>Added note regarding to 1.02 version of the game in settings window.</change>
+			<change>Added a label that is reflecting current status of Autosplitter (if it's injected, if it found process etc.)</change>
+		</changelog>
+	</update>
 	<update version="1.2.0">
 		<files>
 			<file path="Components/LiveSplit.UnderworldAscendant.dll" status="changed"/>

@@ -38,6 +38,7 @@ namespace LiveSplit.UnderworldAscendant
             _timer.CurrentState.OnStart += timer_OnStart;
 
             _gameMemory = new GameMemory(this.Settings);
+            _gameMemory.OnFirstLevelLoad += gameMemory_OnFirstLevelLoaded;
             _gameMemory.OnLoadStarted += gameMemory_OnLoadStarted;
             _gameMemory.OnLoadFinished += gameMemory_OnLoadFinished;
             _gameMemory.OnLevelChanged += gameMemory_OnLevelChanged;
@@ -73,6 +74,14 @@ namespace LiveSplit.UnderworldAscendant
             if(this.Settings.SplitOnLevelChange)
             {
                 _timer.Split();
+            }
+        }
+
+        void gameMemory_OnFirstLevelLoaded(object sender, EventArgs e)
+        {
+            if(this.Settings.StartOnFirstLevelLoad)
+            {
+                _timer.Start();
             }
         }
 

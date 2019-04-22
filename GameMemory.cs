@@ -16,6 +16,7 @@ namespace LiveSplit.UnderworldAscendant
         public event EventHandler OnLoadStarted;
         public event EventHandler OnLoadFinished;
         public event EventHandler OnLevelChanged;
+        public event EventHandler OnFirstLevelLoad;
 
 
         private Task _thread;
@@ -23,6 +24,14 @@ namespace LiveSplit.UnderworldAscendant
         private SynchronizationContext _uiThread;
         private List<int> _ignorePIDs;
         private UnderworldAscendantSettings _settings;
+
+        private string[] LevelsExcludedFromAutosplitting = new string[]
+        {
+            "MainMenu",
+            "IntroSequence",
+            "Credits",
+            ""
+        };
 
         public GameMemory(UnderworldAscendantSettings componentSettings)
         {
@@ -66,6 +75,20 @@ namespace LiveSplit.UnderworldAscendant
         string prevLevelName = "";
         bool loadingStarted = false;
 
+        //Used in displaying status in Settings
+        enum InjectionStatus
+        {
+            NoProcess,
+            FoundProcessWaiting,
+            Scanning,
+            FailedScanning,
+            FailedToInject,
+            Injected
+        }
+
+        InjectionStatus lastInjectionStatus = InjectionStatus.NoProcess;
+
+
         //This is a size of Assembly-CSharp.dll, not main module!
         enum CsharpAssemblySizes
         {
@@ -77,7 +100,6 @@ namespace LiveSplit.UnderworldAscendant
         int gameVersion = 0;
 
         IntPtr LevelSystemInstancePointer = IntPtr.Zero;
-
 
         void MemoryReadThread()
         {
@@ -115,6 +137,8 @@ namespace LiveSplit.UnderworldAscendant
                         }
 
                         prevIsLoading = true;
+
+                        SetInjectionLabelInSettings(InjectionStatus.NoProcess, IntPtr.Zero);
                     }
 
                     Debug.WriteLine("[NoLoads] Got games process!");
@@ -138,10 +162,12 @@ namespace LiveSplit.UnderworldAscendant
                                 //Should refresh game pages... hopefully. The memory pages extansion is really poop.
                                 game = null;
 
+                                SetInjectionLabelInSettings(InjectionStatus.FailedScanning, IntPtr.Zero);
                             }
                             //Hook only if the process is at least 15s old (since it takes forever with allocating stuff)
                             else if (game.UserProcessorTime >= TimeSpan.FromSeconds(15))
                             {
+                                SetInjectionLabelInSettings(InjectionStatus.Scanning, IntPtr.Zero);
                                 var sigScanTarget = new SigScanTarget(
                                     "48 8B EC " +
                                     "48 83 EC 30 " +
@@ -202,9 +228,11 @@ namespace LiveSplit.UnderworldAscendant
                                         var detourInstalled = game.WriteDetour(functionAddress, 14, allocation);
                                         var returnInstalled = game.WriteJumpInstruction(allocation + contentOfAHook.Count - 15, functionAddress + 14);
                                         isLevelSystemHooked = true;
+                                        SetInjectionLabelInSettings(InjectionStatus.Injected, LevelSystemInstancePointer);
                                     }
                                     catch
                                     {
+                                        SetInjectionLabelInSettings(InjectionStatus.FailedToInject, IntPtr.Zero);
                                         throw;
                                     }
                                     finally
@@ -213,6 +241,8 @@ namespace LiveSplit.UnderworldAscendant
                                     }
                                 }
                             }
+                            else
+                                SetInjectionLabelInSettings(InjectionStatus.FoundProcessWaiting, IntPtr.Zero);
                             #endregion
                         }
                         else
@@ -220,22 +250,22 @@ namespace LiveSplit.UnderworldAscendant
                             switch(gameVersion)
                             {
                                 case 0:
-                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
                                     break;
                                 case 1:
-                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
                                     break;
                                 default:
-                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 20);
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xBA));
                                     break;
                             }
 
                             if (isLoading != prevIsLoading || currentLevelName != prevLevelName)
                             {
-                                if (isLoading || currentLevelName == "MainMenu" || currentLevelName == "Intro")
+                                if (isLoading || (currentLevelName != null && LevelsExcludedFromAutosplitting.Contains(currentLevelName)))
                                 {
                                     Debug.WriteLine(String.Format("[NoLoads] Load Start - {0}", frameCounter));
 
@@ -268,10 +298,18 @@ namespace LiveSplit.UnderworldAscendant
                                                 OnLoadFinished(this, EventArgs.Empty);
                                             }
                                         }, null);
+
+                                        _uiThread.Post(d =>
+                                        {
+                                            if(OnFirstLevelLoad != null)
+                                            {
+                                                OnFirstLevelLoad(this, EventArgs.Empty);
+                                            }
+                                        }, null);
                                     }
                                 }
 
-                                if (currentLevelName != prevLevelName && prevLevelName != null && prevLevelName != "")
+                                if (currentLevelName != prevLevelName && prevLevelName != null && currentLevelName != null && !LevelsExcludedFromAutosplitting.Contains(currentLevelName) && !LevelsExcludedFromAutosplitting.Contains(prevLevelName))
                                 {
                                     _uiThread.Post(d =>
                                     {
@@ -356,6 +394,48 @@ namespace LiveSplit.UnderworldAscendant
             }
 
             return game;
+        }
+
+        private void SetInjectionLabelInSettings(InjectionStatus currentInjectionStatus, IntPtr injectedPointer)
+        {
+            if(lastInjectionStatus != currentInjectionStatus || currentInjectionStatus == InjectionStatus.Scanning)
+            {
+                //UI is on different thread, invoke is required
+                if (_settings.L_InjectionStatus.InvokeRequired)
+                    _settings.L_InjectionStatus.Invoke(new Action(() => SetInjectionLabelInSettings(currentInjectionStatus, injectedPointer)));
+                else
+                {
+                    switch (currentInjectionStatus)
+                    {
+                        case (InjectionStatus.NoProcess):
+                            _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Black;
+                            _settings.L_InjectionStatus.Text = "No process found";
+                            break;
+                        case (InjectionStatus.FoundProcessWaiting):
+                            _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.DarkBlue;
+                            _settings.L_InjectionStatus.Text = "Found process! Waiting for it to mature (15 seconds).";
+                            break;
+                        case (InjectionStatus.Scanning):
+                            _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Blue;
+                            _settings.L_InjectionStatus.Text = string.Format("Scanning... ({0} failed scans).", failedScansCount);
+                            break;
+                        case (InjectionStatus.FailedScanning):
+                            _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Red;
+                            _settings.L_InjectionStatus.Text = "Scan failed!";
+                            break;
+                        case (InjectionStatus.FailedToInject):
+                            _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Red;
+                            _settings.L_InjectionStatus.Text = "Failed to inject code!";
+                            break;
+                        case (InjectionStatus.Injected):
+                            _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Green;
+                            _settings.L_InjectionStatus.Text = "Successfully injected code. Ptr copy at: 0x" + injectedPointer.ToString("X8");
+                            break;
+                    }
+
+                    lastInjectionStatus = currentInjectionStatus;
+                }
+            }
         }
     }
 }
