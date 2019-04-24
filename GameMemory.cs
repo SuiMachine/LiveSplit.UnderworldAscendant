@@ -18,12 +18,22 @@ namespace LiveSplit.UnderworldAscendant
         public event EventHandler OnLevelChanged;
         public event EventHandler OnFirstLevelLoad;
 
-
         private Task _thread;
         private CancellationTokenSource _cancelSource;
         private SynchronizationContext _uiThread;
         private List<int> _ignorePIDs;
         private UnderworldAscendantSettings _settings;
+
+        IntPtr LevelSystemInstancePointer = IntPtr.Zero;
+        IntPtr originalFunctionAddress = IntPtr.Zero;
+        IntPtr codeDetour = IntPtr.Zero;
+
+        private byte[] OriginalInstructionBytes = new byte[] {
+            0x48, 0x8B, 0xEC,           //mov rbp,rsp
+            0x48, 0x83, 0xEC, 0x30,     //sub rsp,30 
+            0x48, 0x89, 0x75, 0xF8,     //mov [rbp-08],rsi
+            0x48, 0x8B, 0xF1            //mov rsi,rcx
+        };
 
         private string[] LevelsExcludedFromAutosplitting = new string[]
         {
@@ -36,7 +46,6 @@ namespace LiveSplit.UnderworldAscendant
         public GameMemory(UnderworldAscendantSettings componentSettings)
         {
             _settings = componentSettings;
-
             _ignorePIDs = new List<int>();
         }
 
@@ -63,8 +72,21 @@ namespace LiveSplit.UnderworldAscendant
                 return;
             }
 
+            if(originalFunctionAddress != IntPtr.Zero && game != null && !game.HasExited && isLevelSystemHooked)
+            {
+                Debug.WriteLine("[NOLOADS] Restoring original function.");
+                game.Suspend();
+                game.WriteBytes(originalFunctionAddress, OriginalInstructionBytes);
+                game.FreeMemory(codeDetour);
+                game.FreeMemory(LevelSystemInstancePointer);
+                game.Resume();
+
+            }
+
             _cancelSource.Cancel();
             _thread.Wait();
+
+
         }
 
         int failedScansCount = 0;
@@ -99,7 +121,7 @@ namespace LiveSplit.UnderworldAscendant
 
         int gameVersion = 0;
 
-        IntPtr LevelSystemInstancePointer = IntPtr.Zero;
+        Process game;
 
         void MemoryReadThread()
         {
@@ -111,7 +133,6 @@ namespace LiveSplit.UnderworldAscendant
                 {
                     Debug.WriteLine("[NoLoads] Waiting for UA.exe...");
 
-                    Process game;
                     while ((game = GetGameProcess()) == null)
                     {
                         Thread.Sleep(250);
@@ -187,14 +208,9 @@ namespace LiveSplit.UnderworldAscendant
                                 Debug.WriteLine("[NOLOADS] injectedPtrForLevelSystemPtr allocated at: " + LevelSystemInstancePointer.ToString("X8"));
                                 var injectedPtrForLevelSystemBytes = BitConverter.GetBytes(LevelSystemInstancePointer.ToInt64());
 
-                                var functionAddress = IntPtr.Zero;
-                                var contentOfAHook = new List<byte>
-                                {
-                                        0x48, 0x8B, 0xEC,           //mov rbp,rsp
-				                        0x48, 0x83, 0xEC, 0x30,     //sub rsp,30 
-				                        0x48, 0x89, 0x75, 0xF8,     //mov [rbp-08],rsi
-				                        0x48, 0x8B, 0xF1            //mov rsi,rcx
-		                        };
+                                originalFunctionAddress = IntPtr.Zero;
+                                var contentOfAHook = new List<byte>();
+                                contentOfAHook.AddRange(OriginalInstructionBytes);
                                 contentOfAHook.AddRange(new byte[] { 0x48, 0xB8 });         //mov rax,....
                                 contentOfAHook.AddRange(injectedPtrForLevelSystemBytes);    //address for rax^^
                                 contentOfAHook.AddRange(new byte[] { 0x48, 0x89, 0x08 });  //mov [rax], rcx
@@ -204,13 +220,13 @@ namespace LiveSplit.UnderworldAscendant
                                 foreach (var page in game.MemoryPages())
                                 {
                                     var scanner = new SignatureScanner(game, page.BaseAddress, (int)page.RegionSize);
-                                    if ((functionAddress = scanner.Scan(sigScanTarget)) != IntPtr.Zero)
+                                    if ((originalFunctionAddress = scanner.Scan(sigScanTarget)) != IntPtr.Zero)
                                     {
                                         break;
                                     }
                                 }
 
-                                if (functionAddress == IntPtr.Zero)
+                                if (originalFunctionAddress == IntPtr.Zero)
                                 {
                                     failedScansCount++;
                                     Debug.WriteLine("[NOLOADS] Failed scans: " + failedScansCount);
@@ -218,15 +234,15 @@ namespace LiveSplit.UnderworldAscendant
                                 }
                                 else
                                 {
-                                    Debug.WriteLine("[NOLOADS] FOUND SIGNATURE AT: 0x" + functionAddress.ToString("X8"));
-                                    var allocation = game.AllocateMemory(contentOfAHook.Count);
+                                    Debug.WriteLine("[NOLOADS] FOUND SIGNATURE AT: 0x" + originalFunctionAddress.ToString("X8"));
+                                    codeDetour = game.AllocateMemory(contentOfAHook.Count);
                                     game.Suspend();
 
                                     try
                                     {
-                                        var oInitPtr = game.WriteBytes(allocation, contentOfAHook.ToArray());
-                                        var detourInstalled = game.WriteDetour(functionAddress, 14, allocation);
-                                        var returnInstalled = game.WriteJumpInstruction(allocation + contentOfAHook.Count - 15, functionAddress + 14);
+                                        var oInitPtr = game.WriteBytes(codeDetour, contentOfAHook.ToArray());
+                                        var detourInstalled = game.WriteDetour(originalFunctionAddress, 14, codeDetour);
+                                        var returnInstalled = game.WriteJumpInstruction(codeDetour + contentOfAHook.Count - 15, originalFunctionAddress + 14);
                                         isLevelSystemHooked = true;
                                         SetInjectionLabelInSettings(InjectionStatus.Injected, LevelSystemInstancePointer);
                                     }
