@@ -28,11 +28,18 @@ namespace LiveSplit.UnderworldAscendant
         IntPtr originalFunctionAddress = IntPtr.Zero;
         IntPtr codeDetour = IntPtr.Zero;
 
-        private byte[] OriginalInstructionBytes = new byte[] {
+        private byte[] OriginalInstructionBytesBefore14 = new byte[] {
             0x48, 0x8B, 0xEC,           //mov rbp,rsp
             0x48, 0x83, 0xEC, 0x30,     //sub rsp,30 
             0x48, 0x89, 0x75, 0xF8,     //mov [rbp-08],rsi
             0x48, 0x8B, 0xF1            //mov rsi,rcx
+        };
+
+        private byte[] OriginalInstructionBytesV14 = new byte[] {
+            0x48, 0x8B, 0x89, 0xB8, 0x00, 0x00, 0x00,   //mov rcx,[rcx+000000B8]
+            0x33, 0xD2,                                 //xor edx,edx
+            0x89, 0x31,                                 //mov [rcx],esi
+            0x8D, 0x4A, 0x05                            //lea ecx,[rdx+05]
         };
 
         private string[] LevelsExcludedFromAutosplitting = new string[]
@@ -76,7 +83,7 @@ namespace LiveSplit.UnderworldAscendant
             {
                 Debug.WriteLine("[NOLOADS] Restoring original function.");
                 game.Suspend();
-                game.WriteBytes(originalFunctionAddress, OriginalInstructionBytes);
+                game.WriteBytes(originalFunctionAddress, OriginalInstructionBytesBefore14);
                 game.FreeMemory(codeDetour);
                 game.FreeMemory(LevelSystemInstancePointer);
                 game.Resume();
@@ -105,6 +112,7 @@ namespace LiveSplit.UnderworldAscendant
             Scanning,
             FailedScanning,
             FailedToInject,
+            UnknownLibrarySize,
             Injected
         }
 
@@ -117,6 +125,11 @@ namespace LiveSplit.UnderworldAscendant
             v1_02 = 5471232,
             v1_1 = 5386752,
             Newest
+        }
+
+        enum GameAssemblySizes
+        {
+            v1_4 = 43638784
         }
 
         int gameVersion = 0;
@@ -171,94 +184,139 @@ namespace LiveSplit.UnderworldAscendant
                         if (!isLevelSystemHooked)
                         {
                             #region Hooking
-                            if (_settings.RescansLimit != 0 && failedScansCount >= _settings.RescansLimit)
+                            #region BeforeIntroductionOfILCPP-internals
+                            if (gameVersion < 4)
                             {
-                                var result = MessageBox.Show("Failed to find the pattern during the 3 scan loops. Want to retry scans?", "Error", MessageBoxButtons.RetryCancel, MessageBoxIcon.Exclamation);
-                                if (result == DialogResult.Cancel)
+                                if (_settings.RescansLimit != 0 && failedScansCount >= _settings.RescansLimit)
                                 {
-                                    _ignorePIDs.Add(game.Id);
+                                    var result = MessageBox.Show("Failed to find the pattern during the 3 scan loops. Want to retry scans?", "Error", MessageBoxButtons.RetryCancel, MessageBoxIcon.Exclamation);
+                                    if (result == DialogResult.Cancel)
+                                    {
+                                        _ignorePIDs.Add(game.Id);
+                                    }
+                                    else
+                                        failedScansCount = 0;
+                                    //Should refresh game pages... hopefully. The memory pages extansion is really poop.
+                                    game = null;
+
+                                    SetInjectionLabelInSettings(InjectionStatus.FailedScanning, IntPtr.Zero);
+                                }
+                                //Hook only if the process is at least 15s old (since it takes forever with allocating stuff)
+                                else if (game.UserProcessorTime >= TimeSpan.FromSeconds(15))
+                                {
+                                    SetInjectionLabelInSettings(InjectionStatus.Scanning, IntPtr.Zero);
+                                    var sigScanTarget = new SigScanTarget(
+                                        "48 8B EC " +
+                                        "48 83 EC 30 " +
+                                        "48 89 75 F8 " +
+                                        "48 8B F1 " +
+                                        "48 8B 46 10 " +
+                                        "48 85 C0 " +
+                                        "?? ?? " +
+                                        "48 8B 46 10 " +
+                                        "48 8B C8 " +
+                                        "48 89 45 F0 " +
+                                        "FF 50 18 " +
+                                        "48 8B 45 F0 ");
+
+
+                                    LevelSystemInstancePointer = game.AllocateMemory(IntPtr.Size);
+                                    Debug.WriteLine("[NOLOADS] injectedPtrForLevelSystemPtr allocated at: " + LevelSystemInstancePointer.ToString("X8"));
+                                    var injectedPtrForLevelSystemBytes = BitConverter.GetBytes(LevelSystemInstancePointer.ToInt64());
+
+                                    originalFunctionAddress = IntPtr.Zero;
+                                    var contentOfAHook = new List<byte>();
+                                    contentOfAHook.AddRange(OriginalInstructionBytesBefore14);
+                                    contentOfAHook.AddRange(new byte[] { 0x48, 0xB8 });         //mov rax,....
+                                    contentOfAHook.AddRange(injectedPtrForLevelSystemBytes);    //address for rax^^
+                                    contentOfAHook.AddRange(new byte[] { 0x48, 0x89, 0x08 });  //mov [rax], rcx
+                                    contentOfAHook.AddRange(new byte[] { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 }); //14 nops for jmp back (actually needs I think 2 less)
+
+                                    Debug.WriteLine("[NOLOADS] Scanning for signature (LevelSystem:Update)");
+                                    foreach (var page in game.MemoryPages())
+                                    {
+                                        var scanner = new SignatureScanner(game, page.BaseAddress, (int)page.RegionSize);
+                                        if ((originalFunctionAddress = scanner.Scan(sigScanTarget)) != IntPtr.Zero)
+                                        {
+                                            break;
+                                        }
+                                    }
+
+                                    if (originalFunctionAddress == IntPtr.Zero)
+                                    {
+                                        failedScansCount++;
+                                        Debug.WriteLine("[NOLOADS] Failed scans: " + failedScansCount);
+                                        game.FreeMemory(LevelSystemInstancePointer);
+                                    }
+                                    else
+                                    {
+                                        Debug.WriteLine("[NOLOADS] FOUND SIGNATURE AT: 0x" + originalFunctionAddress.ToString("X8"));
+                                        codeDetour = game.AllocateMemory(contentOfAHook.Count);
+                                        game.Suspend();
+
+                                        try
+                                        {
+                                            var oInitPtr = game.WriteBytes(codeDetour, contentOfAHook.ToArray());
+                                            var detourInstalled = game.WriteDetour(originalFunctionAddress, 14, codeDetour);
+                                            var returnInstalled = game.WriteJumpInstruction(codeDetour + contentOfAHook.Count - 15, originalFunctionAddress + 14);
+                                            isLevelSystemHooked = true;
+                                            SetInjectionLabelInSettings(InjectionStatus.Injected, LevelSystemInstancePointer);
+                                        }
+                                        catch
+                                        {
+                                            SetInjectionLabelInSettings(InjectionStatus.FailedToInject, IntPtr.Zero);
+                                            throw;
+                                        }
+                                        finally
+                                        {
+                                            game.Resume();
+                                        }
+                                    }
                                 }
                                 else
-                                    failedScansCount = 0;
-                                //Should refresh game pages... hopefully. The memory pages extansion is really poop.
-                                game = null;
-
-                                SetInjectionLabelInSettings(InjectionStatus.FailedScanning, IntPtr.Zero);
+                                    SetInjectionLabelInSettings(InjectionStatus.FoundProcessWaiting, IntPtr.Zero);
                             }
-                            //Hook only if the process is at least 15s old (since it takes forever with allocating stuff)
-                            else if (game.UserProcessorTime >= TimeSpan.FromSeconds(15))
+                            #endregion
+                            #region ILCPPInternals
+                            else
                             {
-                                SetInjectionLabelInSettings(InjectionStatus.Scanning, IntPtr.Zero);
-                                var sigScanTarget = new SigScanTarget(
-                                    "48 8B EC " +
-                                    "48 83 EC 30 " +
-                                    "48 89 75 F8 " +
-                                    "48 8B F1 " +
-                                    "48 8B 46 10 " +
-                                    "48 85 C0 " +
-                                    "?? ?? " +
-                                    "48 8B 46 10 " +
-                                    "48 8B C8 " +
-                                    "48 89 45 F0 " +
-                                    "FF 50 18 " +
-                                    "48 8B 45 F0 ");
-
-
                                 LevelSystemInstancePointer = game.AllocateMemory(IntPtr.Size);
                                 Debug.WriteLine("[NOLOADS] injectedPtrForLevelSystemPtr allocated at: " + LevelSystemInstancePointer.ToString("X8"));
                                 var injectedPtrForLevelSystemBytes = BitConverter.GetBytes(LevelSystemInstancePointer.ToInt64());
 
-                                originalFunctionAddress = IntPtr.Zero;
+                                originalFunctionAddress = game.ModulesWow64Safe().First(x => x.ModuleName.ToLower() == "gameassembly.dll").BaseAddress  + 0x120D382;
                                 var contentOfAHook = new List<byte>();
-                                contentOfAHook.AddRange(OriginalInstructionBytes);
+                                contentOfAHook.AddRange(OriginalInstructionBytesV14);
                                 contentOfAHook.AddRange(new byte[] { 0x48, 0xB8 });         //mov rax,....
                                 contentOfAHook.AddRange(injectedPtrForLevelSystemBytes);    //address for rax^^
-                                contentOfAHook.AddRange(new byte[] { 0x48, 0x89, 0x08 });  //mov [rax], rcx
+                                contentOfAHook.AddRange(new byte[] { 0x48, 0x89, 0x38 });  //mov [rax], rdi (rdi is base of an object)
                                 contentOfAHook.AddRange(new byte[] { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 }); //14 nops for jmp back (actually needs I think 2 less)
 
-                                Debug.WriteLine("[NOLOADS] Scanning for signature (LevelSystem:Update)");
-                                foreach (var page in game.MemoryPages())
-                                {
-                                    var scanner = new SignatureScanner(game, page.BaseAddress, (int)page.RegionSize);
-                                    if ((originalFunctionAddress = scanner.Scan(sigScanTarget)) != IntPtr.Zero)
-                                    {
-                                        break;
-                                    }
-                                }
+                                //Thankfully no longer need to do sig scans... fuck sigscans
+                                Debug.WriteLine("[NOLOADS] INJECTING AT: 0x" + originalFunctionAddress.ToString("X8"));
+                                codeDetour = game.AllocateMemory(contentOfAHook.Count);
+                                game.Suspend();
 
-                                if (originalFunctionAddress == IntPtr.Zero)
+                                try
                                 {
-                                    failedScansCount++;
-                                    Debug.WriteLine("[NOLOADS] Failed scans: " + failedScansCount);
-                                    game.FreeMemory(LevelSystemInstancePointer);
+                                    var oInitPtr = game.WriteBytes(codeDetour, contentOfAHook.ToArray());
+                                    var detourInstalled = game.WriteDetour(originalFunctionAddress, OriginalInstructionBytesV14.Length, codeDetour);
+                                    var returnInstalled = game.WriteJumpInstruction(codeDetour + contentOfAHook.Count - 15, originalFunctionAddress + OriginalInstructionBytesV14.Length);
+                                    isLevelSystemHooked = true;
+                                    SetInjectionLabelInSettings(InjectionStatus.Injected, LevelSystemInstancePointer);
                                 }
-                                else
+                                catch
                                 {
-                                    Debug.WriteLine("[NOLOADS] FOUND SIGNATURE AT: 0x" + originalFunctionAddress.ToString("X8"));
-                                    codeDetour = game.AllocateMemory(contentOfAHook.Count);
-                                    game.Suspend();
-
-                                    try
-                                    {
-                                        var oInitPtr = game.WriteBytes(codeDetour, contentOfAHook.ToArray());
-                                        var detourInstalled = game.WriteDetour(originalFunctionAddress, 14, codeDetour);
-                                        var returnInstalled = game.WriteJumpInstruction(codeDetour + contentOfAHook.Count - 15, originalFunctionAddress + 14);
-                                        isLevelSystemHooked = true;
-                                        SetInjectionLabelInSettings(InjectionStatus.Injected, LevelSystemInstancePointer);
-                                    }
-                                    catch
-                                    {
-                                        SetInjectionLabelInSettings(InjectionStatus.FailedToInject, IntPtr.Zero);
-                                        throw;
-                                    }
-                                    finally
-                                    {
-                                        game.Resume();
-                                    }
+                                    SetInjectionLabelInSettings(InjectionStatus.FailedToInject, IntPtr.Zero);
+                                    throw;
+                                }
+                                finally
+                                {
+                                    game.Resume();
                                 }
                             }
-                            else
-                                SetInjectionLabelInSettings(InjectionStatus.FoundProcessWaiting, IntPtr.Zero);
+                            #endregion
+
                             #endregion
                         }
                         else
@@ -273,14 +331,24 @@ namespace LiveSplit.UnderworldAscendant
                                     currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
                                     break;
-                                default:
+                                case 2:
+                                case 3:
                                     currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xBA));
+                                    break;
+                                default:
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
+                                    isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0x62));
                                     break;
                             }
 
                             if (isLoading != prevIsLoading || currentLevelName != prevLevelName)
                             {
+#if DEBUG
+                                if (currentLevelName != prevLevelName)
+                                    Debug.WriteLine("Level changed from " + prevLevelName + " -> " + currentLevelName);
+#endif
+
                                 if (isLoading || (currentLevelName != null && LevelsExcludedFromAutosplitting.Contains(currentLevelName)))
                                 {
                                     Debug.WriteLine(String.Format("[NoLoads] Load Start - {0}", frameCounter));
@@ -394,20 +462,43 @@ namespace LiveSplit.UnderworldAscendant
             }
 
             var assemblyCsharpPath = Path.Combine(Path.GetDirectoryName(game.MainModule.FileName), "UA_Data", "Managed", "Assembly-CSharp.dll");
-            FileInfo info = new FileInfo(assemblyCsharpPath);
-            switch(info.Length)
+            if(File.Exists(assemblyCsharpPath))
             {
-                case ((long)CsharpAssemblySizes.v1_02):
-                    gameVersion = 0;
-                    break;
-                case ((long)CsharpAssemblySizes.v1_1):
-                    gameVersion = 1;
-                    break;
-                default:
-                    gameVersion = 2;
-                    break;
+                FileInfo info = new FileInfo(assemblyCsharpPath);
+                switch (info.Length)
+                {
+                    case ((long)CsharpAssemblySizes.v1_02):
+                        gameVersion = 0;
+                        break;
+                    case ((long)CsharpAssemblySizes.v1_1):
+                        gameVersion = 1;
+                        break;
+                    default:
+                        gameVersion = 2;
+                        break;
 
+                }
             }
+            else if (FindModuleByName(game, "gameassembly.dll", out ProcessModule gameAssemblyModule))
+            {
+                switch(gameAssemblyModule.ModuleMemorySize)
+                {
+                    case (int)GameAssemblySizes.v1_4:
+                        gameVersion = 4;
+                        break;
+                    default:
+                        SetInjectionLabelInSettings(InjectionStatus.UnknownLibrarySize, IntPtr.Zero);
+                        gameVersion = -1;
+                        _ignorePIDs.Add(game.Id);
+                        return null;
+                }
+            }
+            else
+            {
+                _ignorePIDs.Add(game.Id);
+                return null;
+            }
+
 
             return game;
         }
@@ -443,6 +534,10 @@ namespace LiveSplit.UnderworldAscendant
                             _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Red;
                             _settings.L_InjectionStatus.Text = "Failed to inject code!";
                             break;
+                        case (InjectionStatus.UnknownLibrarySize):
+                            _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Red;
+                            _settings.L_InjectionStatus.Text = "Unknown module size (likely the game has been patched)";
+                            break;
                         case (InjectionStatus.Injected):
                             _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Green;
                             _settings.L_InjectionStatus.Text = "Successfully injected code. Ptr copy at: 0x" + injectedPointer.ToString("X8");
@@ -452,6 +547,21 @@ namespace LiveSplit.UnderworldAscendant
                     lastInjectionStatus = currentInjectionStatus;
                 }
             }
+        }
+
+        private bool FindModuleByName(Process proc, string moduleName, out ProcessModule module)
+        {
+            var modules = proc.Modules;
+            for(int i=0; i<modules.Count; i++)
+            {
+                if(modules[i].ModuleName.ToLower() == moduleName)
+                {
+                    module = modules[i];
+                    return true;
+                }
+            }
+            module = null;
+            return false;
         }
     }
 }
