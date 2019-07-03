@@ -536,7 +536,7 @@ namespace LiveSplit.UnderworldAscendant
                             break;
                         case (InjectionStatus.UnknownLibrarySize):
                             _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Red;
-                            _settings.L_InjectionStatus.Text = "Unknown module size (likely the game has been patched)";
+                            _settings.L_InjectionStatus.Text = "Unknown module size (likely the game has been patched). Tell Sui!";
                             break;
                         case (InjectionStatus.Injected):
                             _settings.L_InjectionStatus.ForeColor = System.Drawing.Color.Green;
