@@ -9,7 +9,13 @@ Features
 Requirements
 ------------
 
-  * Underworld Ascendant (tested with versions 1.02, 1.1 and 1.3)
+  * Underworld Ascendant
+    * 1.0.0 (build 11.13.2018 - 04:48 PM)
+    * 1.0.2 (build 11.16.2018 - 02:53 PM)
+	* 1.1
+	* 1.3
+	* 1.4
+	* Current version is not supported. Bother Sui if you want it supported.
   * LiveSplit 1.4+
   * .NET Framework 4.5 
 

@@ -122,6 +122,7 @@ namespace LiveSplit.UnderworldAscendant
         //This is a size of Assembly-CSharp.dll, not main module!
         enum CsharpAssemblySizes
         {
+            v1_00 = 5490688,
             v1_02 = 5471232,
             v1_1 = 5386752,
             Newest
@@ -132,7 +133,17 @@ namespace LiveSplit.UnderworldAscendant
             v1_4 = 43638784
         }
 
-        int gameVersion = 0;
+        enum GameVersions
+        {
+            v1_00,
+            v1_02,
+            v1_1,
+            v1_3,
+            v1_4,
+            Unsupported
+        }
+
+        GameVersions gameVersion = GameVersions.Unsupported;
 
         Process game;
 
@@ -185,7 +196,7 @@ namespace LiveSplit.UnderworldAscendant
                         {
                             #region Hooking
                             #region BeforeIntroductionOfILCPP-internals
-                            if (gameVersion < 4)
+                            if (gameVersion < GameVersions.v1_4)
                             {
                                 if (_settings.RescansLimit != 0 && failedScansCount >= _settings.RescansLimit)
                                 {
@@ -323,16 +334,19 @@ namespace LiveSplit.UnderworldAscendant
                         {
                             switch(gameVersion)
                             {
-                                case 0:
+                                case GameVersions.v1_00:
                                     currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
                                     break;
-                                case 1:
+                                case GameVersions.v1_02:
                                     currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
                                     break;
-                                case 2:
-                                case 3:
+                                case GameVersions.v1_1:
+                                    currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
+                                    isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xB2));
+                                    break;
+                                case GameVersions.v1_3:
                                     currentLevelName = game.ReadString(game.ReadPointer(game.ReadPointer(LevelSystemInstancePointer) + 0x50) + 0x14, ReadStringType.UTF16, 30);
                                     isLoading = !(game.ReadValue<bool>(game.ReadPointer(LevelSystemInstancePointer) + 0xBA));
                                     break;
@@ -467,14 +481,17 @@ namespace LiveSplit.UnderworldAscendant
                 FileInfo info = new FileInfo(assemblyCsharpPath);
                 switch (info.Length)
                 {
+                    case ((long)CsharpAssemblySizes.v1_00):
+                        gameVersion = GameVersions.v1_00;
+                        break;
                     case ((long)CsharpAssemblySizes.v1_02):
-                        gameVersion = 0;
+                        gameVersion = GameVersions.v1_02;
                         break;
                     case ((long)CsharpAssemblySizes.v1_1):
-                        gameVersion = 1;
+                        gameVersion = GameVersions.v1_1;
                         break;
                     default:
-                        gameVersion = 2;
+                        gameVersion = GameVersions.v1_3;
                         break;
 
                 }
@@ -484,11 +501,11 @@ namespace LiveSplit.UnderworldAscendant
                 switch(gameAssemblyModule.ModuleMemorySize)
                 {
                     case (int)GameAssemblySizes.v1_4:
-                        gameVersion = 4;
+                        gameVersion = GameVersions.v1_4;
                         break;
                     default:
                         SetInjectionLabelInSettings(InjectionStatus.UnknownLibrarySize, IntPtr.Zero);
-                        gameVersion = -1;
+                        gameVersion = GameVersions.Unsupported;
                         _ignorePIDs.Add(game.Id);
                         return null;
                 }

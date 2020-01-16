@@ -1,4 +1,13 @@
 <updates>
+	<update version="1.4.1">
+		<files>
+			<file path="Components/LiveSplit.UnderworldAscendant.dll" status="changed"/>
+		</files>
+		<changelog>
+			<change>Added support for 1.0.0 version of the game (just cause!)</change>
+			<change>Retargeted to use .NET 4.6.1 (since it's the current version of .NET that LiveSplit uses)</change>
+		</changelog>
+	</update>
 	<update version="1.4.0">
 		<files>
 			<file path="Components/LiveSplit.UnderworldAscendant.dll" status="changed"/>
